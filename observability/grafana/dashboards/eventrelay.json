@@ -1,0 +1,82 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 0,
+  "time": { "from": "now-15m", "to": "now" },
+  "refresh": "10s",
+  "title": "EventRelay Overview",
+  "uid": "eventrelay-overview",
+  "schemaVersion": 39,
+  "tags": ["eventrelay"],
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Event ingestion rate (by result)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum by (result) (rate(eventrelay_events_ingested_total[1m]))",
+          "legendFormat": "{{result}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Delivery attempts (by result)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum by (result) (rate(eventrelay_delivery_attempts_total[1m]))",
+          "legendFormat": "{{result}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Delivery latency (avg, p over window)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "rate(eventrelay_delivery_duration_seconds_sum[1m]) / rate(eventrelay_delivery_duration_seconds_count[1m])",
+          "legendFormat": "avg",
+          "refId": "A"
+        },
+        {
+          "expr": "eventrelay_delivery_duration_seconds_max",
+          "legendFormat": "max",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Dead-lettered (total)",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "thresholds" }, "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] } }, "overrides": [] },
+      "targets": [ { "expr": "sum(eventrelay_deliveries_dead_lettered_total)", "refId": "A" } ]
+    },
+    {
+      "type": "stat",
+      "title": "Rate-limited requests (total)",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [ { "expr": "sum(eventrelay_ingest_rate_limited_total)", "refId": "A" } ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Retries & circuit-skips",
+      "gridPos": { "h": 4, "w": 12, "x": 12, "y": 12 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        { "expr": "rate(eventrelay_delivery_retries_total[1m])", "legendFormat": "retries", "refId": "A" },
+        { "expr": "rate(eventrelay_delivery_skipped_total[1m])", "legendFormat": "circuit-skipped", "refId": "B" }
+      ]
+    }
+  ]
+}

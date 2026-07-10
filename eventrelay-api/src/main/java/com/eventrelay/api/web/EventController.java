@@ -1,6 +1,7 @@
 package com.eventrelay.api.web;
 
 import com.eventrelay.api.idempotency.RedisIdempotencyCache;
+import com.eventrelay.api.ratelimit.RateLimiter;
 import com.eventrelay.api.security.ApiKeyAuthFilter;
 import com.eventrelay.api.web.dto.EventDtos.DeliveryAttemptResponse;
 import com.eventrelay.api.web.dto.EventDtos.IngestEventRequest;
@@ -22,6 +23,7 @@ import com.eventrelay.core.service.IngestionService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -50,6 +52,8 @@ public class EventController {
     private final SubscriptionRepository subscriptions;
     private final DeliveryService deliveryService;
     private final RedisIdempotencyCache idempotencyCache;
+    private final RateLimiter rateLimiter;
+    private final MeterRegistry metrics;
     private final ObjectMapper objectMapper;
 
     public EventController(IngestionService ingestion, EventRepository events,
@@ -58,6 +62,8 @@ public class EventController {
                            SubscriptionRepository subscriptions,
                            DeliveryService deliveryService,
                            RedisIdempotencyCache idempotencyCache,
+                           RateLimiter rateLimiter,
+                           MeterRegistry metrics,
                            ObjectMapper objectMapper) {
         this.ingestion = ingestion;
         this.events = events;
@@ -66,6 +72,8 @@ public class EventController {
         this.subscriptions = subscriptions;
         this.deliveryService = deliveryService;
         this.idempotencyCache = idempotencyCache;
+        this.rateLimiter = rateLimiter;
+        this.metrics = metrics;
         this.objectMapper = objectMapper;
     }
 
@@ -75,6 +83,12 @@ public class EventController {
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody IngestEventRequest request) {
 
+        if (!rateLimiter.allow(tenant)) {
+            metrics.counter("eventrelay.ingest.rate_limited").increment();
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
+                    "Per-tenant rate limit exceeded");
+        }
+
         boolean hasKey = idempotencyKey != null && !idempotencyKey.isBlank();
 
         // Fast path: a cached key means we already ingested this exact request.
@@ -83,6 +97,7 @@ public class EventController {
             if (cached.isPresent()) {
                 Optional<Event> existing = events.findById(cached.get());
                 if (existing.isPresent()) {
+                    metrics.counter("eventrelay.events.ingested", "result", "duplicate").increment();
                     return ResponseEntity.ok(response(existing.get(), true));
                 }
             }
@@ -97,6 +112,8 @@ public class EventController {
         if (hasKey) {
             idempotencyCache.remember(tenant.getId(), idempotencyKey, result.event().getId());
         }
+        metrics.counter("eventrelay.events.ingested",
+                "result", result.duplicate() ? "duplicate" : "accepted").increment();
 
         HttpStatus status = result.duplicate() ? HttpStatus.OK : HttpStatus.ACCEPTED;
         return ResponseEntity.status(status).body(response(result.event(), result.duplicate()));

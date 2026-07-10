@@ -4,6 +4,7 @@ import com.eventrelay.dispatcher.queue.DeliveryQueue;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -66,12 +67,15 @@ public class DeliveryWorker {
     }
 
     private void handle(Message message) {
+        MDC.put("deliveryId", message.body());
         try {
             processor.process(message.body());
             queue.delete(message.receiptHandle());
         } catch (Exception e) {
             // Leave the message on the queue; it reappears after the visibility timeout.
             log.error("Failed to process delivery {}; will be redelivered", message.body(), e);
+        } finally {
+            MDC.remove("deliveryId");
         }
     }
 

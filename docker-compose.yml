@@ -45,5 +45,31 @@ services:
       timeout: 5s
       retries: 10
 
+  # --- Observability (optional; `docker compose --profile observability up -d`) ---
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: eventrelay-prometheus
+    profiles: ["observability"]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: eventrelay-grafana
+    profiles: ["observability"]
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+
 volumes:
   pgdata:

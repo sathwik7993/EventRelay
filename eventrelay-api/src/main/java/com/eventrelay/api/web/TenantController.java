@@ -29,7 +29,8 @@ public class TenantController {
 
     @PostMapping
     public ResponseEntity<CreateTenantResponse> create(@Valid @RequestBody CreateTenantRequest request) {
-        TenantService.Created created = tenants.createTenant(request.name(), request.slug());
+        TenantService.Created created =
+                tenants.createTenant(request.name(), request.slug(), request.rateLimitRps());
         CreateTenantResponse body = new CreateTenantResponse(
                 created.tenant().getId(),
                 created.tenant().getName(),

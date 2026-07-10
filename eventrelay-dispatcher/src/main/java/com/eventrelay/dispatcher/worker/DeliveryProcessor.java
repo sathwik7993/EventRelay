@@ -7,7 +7,9 @@ import com.eventrelay.core.domain.Subscription;
 import com.eventrelay.core.repository.DeliveryRepository;
 import com.eventrelay.core.repository.EventRepository;
 import com.eventrelay.core.repository.SubscriptionRepository;
+import com.eventrelay.core.service.DeliveryResult;
 import com.eventrelay.core.service.DeliveryService;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -15,10 +17,10 @@ import org.springframework.stereotype.Service;
 import java.util.UUID;
 
 /**
- * Processes one delivery message: loads current state, performs the signed HTTP
- * attempt, and advances the delivery via {@link DeliveryService}. Safe to invoke
- * more than once for the same delivery (at-least-once queue semantics) — a
- * delivery already DELIVERED or DEAD is skipped.
+ * Processes one delivery message: loads current state, enforces the circuit
+ * breaker, performs the signed HTTP attempt, and advances the delivery via
+ * {@link DeliveryService}. Safe to invoke more than once for the same delivery
+ * (at-least-once queue semantics) — a terminal delivery is skipped.
  */
 @Service
 public class DeliveryProcessor {
@@ -31,15 +33,17 @@ public class DeliveryProcessor {
     private final EventRepository events;
     private final HttpDeliveryClient httpClient;
     private final DeliveryService deliveryService;
+    private final MeterRegistry metrics;
 
     public DeliveryProcessor(DeliveryRepository deliveries, SubscriptionRepository subscriptions,
                              EventRepository events, HttpDeliveryClient httpClient,
-                             DeliveryService deliveryService) {
+                             DeliveryService deliveryService, MeterRegistry metrics) {
         this.deliveries = deliveries;
         this.subscriptions = subscriptions;
         this.events = events;
         this.httpClient = httpClient;
         this.deliveryService = deliveryService;
+        this.metrics = metrics;
     }
 
     public void process(String deliveryId) {
@@ -57,13 +61,22 @@ public class DeliveryProcessor {
         Subscription subscription = subscriptions.findById(delivery.getSubscriptionId()).orElse(null);
 
         if (subscription == null || subscription.getDeletedAt() != null) {
-            deliveryService.recordFailure(delivery, true, null,
-                    "Subscription no longer exists", payloadOf(event));
+            recordDlq(deliveryService.recordFailure(delivery, subscription, true, null,
+                    "Subscription no longer exists", payloadOf(event)));
             return;
         }
         if (event == null) {
-            deliveryService.recordFailure(delivery, true, null,
-                    "Source event no longer exists", EMPTY_PAYLOAD);
+            recordDlq(deliveryService.recordFailure(delivery, subscription, true, null,
+                    "Source event no longer exists", EMPTY_PAYLOAD));
+            return;
+        }
+
+        // Circuit breaker: don't hammer an endpoint that's failing consistently.
+        if (deliveryService.isCircuitOpen(subscription)) {
+            deliveryService.recordSkipped(delivery, subscription);
+            metrics.counter("eventrelay.delivery.skipped").increment();
+            log.debug("Circuit open for subscription {}; skipping delivery {}",
+                    subscription.getId(), delivery.getId());
             return;
         }
 
@@ -71,10 +84,19 @@ public class DeliveryProcessor {
         DeliveryOutcome outcome = httpClient.deliver(delivery, subscription, event, attemptNumber);
 
         if (outcome.success()) {
-            deliveryService.recordSuccess(delivery, outcome.httpStatus());
+            deliveryService.recordSuccess(delivery, subscription, outcome.httpStatus());
         } else {
-            deliveryService.recordFailure(delivery, outcome.permanent(), outcome.httpStatus(),
-                    outcome.error(), event.getPayload());
+            DeliveryResult result = deliveryService.recordFailure(delivery, subscription,
+                    outcome.permanent(), outcome.httpStatus(), outcome.error(), event.getPayload());
+            recordDlq(result);
+        }
+    }
+
+    private void recordDlq(DeliveryResult result) {
+        if (result == DeliveryResult.DEAD_LETTERED) {
+            metrics.counter("eventrelay.deliveries.dead_lettered").increment();
+        } else {
+            metrics.counter("eventrelay.delivery.retries").increment();
         }
     }
 

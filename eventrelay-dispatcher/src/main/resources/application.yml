@@ -50,6 +50,9 @@ eventrelay:
   delivery:
     max-attempts: 8
     http-timeout-ms: 30000
+  circuit:
+    failure-threshold: 5          # consecutive failures before a subscription's circuit opens
+    cooldown-seconds: 30          # how long to skip deliveries while open
 
 logging:
   level:

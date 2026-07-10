@@ -44,6 +44,8 @@ management:
 eventrelay:
   idempotency:
     ttl-hours: 24                 # Redis dedup-cache TTL for Idempotency-Key
+  rate-limit:
+    default-rps: 100              # per-tenant token-bucket rate (override via tenant settings)
 
 logging:
   level:

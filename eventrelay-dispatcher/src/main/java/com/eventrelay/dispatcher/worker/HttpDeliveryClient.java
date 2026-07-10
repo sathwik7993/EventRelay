@@ -9,6 +9,7 @@ import com.eventrelay.core.domain.Subscription;
 import com.eventrelay.core.repository.DeliveryAttemptRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -39,13 +40,16 @@ public class HttpDeliveryClient {
 
     private final DeliveryAttemptRepository attempts;
     private final ObjectMapper objectMapper;
+    private final MeterRegistry metrics;
     private final HttpClient httpClient;
     private final Duration requestTimeout;
 
     public HttpDeliveryClient(DeliveryAttemptRepository attempts, ObjectMapper objectMapper,
+                              MeterRegistry metrics,
                               @Value("${eventrelay.delivery.http-timeout-ms:30000}") long timeoutMs) {
         this.attempts = attempts;
         this.objectMapper = objectMapper;
+        this.metrics = metrics;
         this.requestTimeout = Duration.ofMillis(timeoutMs);
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
@@ -97,10 +101,15 @@ public class HttpDeliveryClient {
             attempt.setStatus(DeliveryStatus.FAILED);
             attempt.setErrorMessage(msg);
         } finally {
-            attempt.setDurationMs((int) Math.max(0, (System.nanoTime() - start) / 1_000_000));
+            long elapsedNanos = System.nanoTime() - start;
+            attempt.setDurationMs((int) Math.max(0, elapsedNanos / 1_000_000));
             attempts.save(attempt);
+            metrics.timer("eventrelay.delivery.duration").record(elapsedNanos, java.util.concurrent.TimeUnit.NANOSECONDS);
         }
 
+        String result = outcome.success() ? "success"
+                : (attempt.getStatus().name().equals("TIMEOUT") ? "timeout" : "failed");
+        metrics.counter("eventrelay.delivery.attempts", "result", result).increment();
         log.debug("Delivery {} attempt {} -> success={} permanent={} status={}",
                 delivery.getId(), attemptNumber, outcome.success(), outcome.permanent(), outcome.httpStatus());
         return outcome;

@@ -28,7 +28,15 @@ public class TenantService {
 
     @Transactional
     public Created createTenant(String name, String slug) {
+        return createTenant(name, slug, null);
+    }
+
+    @Transactional
+    public Created createTenant(String name, String slug, Integer rateLimitRps) {
         Tenant tenant = new Tenant(UUID.randomUUID(), name, slug);
+        if (rateLimitRps != null && rateLimitRps > 0) {
+            tenant.setSettings("{\"rate_limit_rps\":" + rateLimitRps + "}");
+        }
         tenants.save(tenant);
 
         ApiKeys.Generated key = ApiKeys.generate();

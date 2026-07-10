@@ -30,6 +30,8 @@
         <maven.compiler.release>17</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <aws.sdk.version>2.28.11</aws.sdk.version>
+        <!-- Override Boot-managed 1.19.x: newer docker-java negotiates with recent Docker engines -->
+        <testcontainers.version>1.20.4</testcontainers.version>
     </properties>
 
     <dependencyManagement>

@@ -15,7 +15,8 @@ public final class TenantDtos {
             @NotBlank
             @Pattern(regexp = "^[a-z0-9][a-z0-9-]{1,62}$",
                     message = "slug must be lowercase alphanumeric with hyphens")
-            String slug
+            String slug,
+            Integer rateLimitRps
     ) {
     }
 

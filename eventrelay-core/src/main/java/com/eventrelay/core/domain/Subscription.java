@@ -146,6 +146,10 @@ public class Subscription {
         this.failureCount = failureCount;
     }
 
+    public OffsetDateTime getLastFailureAt() {
+        return lastFailureAt;
+    }
+
     public void setLastFailureAt(OffsetDateTime lastFailureAt) {
         this.lastFailureAt = lastFailureAt;
     }
