@@ -39,4 +39,11 @@ public final class EventDtos {
             OffsetDateTime createdAt
     ) {
     }
+
+    public record ReplayResponse(
+            UUID eventId,
+            int replayed,
+            String status
+    ) {
+    }
 }

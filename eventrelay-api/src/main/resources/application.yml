@@ -17,6 +17,11 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 500ms
 
 server:
   port: ${SERVER_PORT:8080}
@@ -37,10 +42,8 @@ management:
           include: ping
 
 eventrelay:
-  dispatch:
-    poll-interval-ms: 500         # outbox polling cadence
-    batch-size: 50                # rows claimed per poll
-    http-timeout-ms: 30000        # per-delivery HTTP timeout
+  idempotency:
+    ttl-hours: 24                 # Redis dedup-cache TTL for Idempotency-Key
 
 logging:
   level:

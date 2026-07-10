@@ -1,0 +1,57 @@
+spring:
+  application:
+    name: eventrelay-dispatcher
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/eventrelay}
+    username: ${DB_USERNAME:eventrelay}
+    password: ${DB_PASSWORD:eventrelay}
+    hikari:
+      maximum-pool-size: 10
+      pool-name: dispatcher-pool
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate.jdbc.time_zone: UTC
+  # Flyway runs from the API service (single schema owner); the dispatcher only reads/writes.
+  flyway:
+    enabled: false
+
+server:
+  port: ${SERVER_PORT:8081}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, prometheus
+  endpoint:
+    health:
+      show-details: always
+
+eventrelay:
+  sqs:
+    endpoint: ${SQS_ENDPOINT:http://localhost:4566}   # LocalStack; unset for real AWS
+    region: ${AWS_REGION:us-east-1}
+    queue-name: ${SQS_QUEUE_NAME:eventrelay-deliveries}
+    visibility-timeout-seconds: 60
+    wait-time-seconds: 10           # long polling
+  relay:
+    poll-interval-ms: 500
+    batch-size: 100
+  scheduler:
+    poll-interval-ms: 1000
+    batch-size: 100
+    lease-seconds: 120              # reclaim QUEUED rows stuck longer than this
+  worker:
+    concurrency: 2
+  delivery:
+    max-attempts: 8
+    http-timeout-ms: 30000
+
+logging:
+  level:
+    com.eventrelay: DEBUG
+    software.amazon.awssdk: WARN

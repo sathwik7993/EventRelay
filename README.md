@@ -13,55 +13,65 @@ subscriber — retrying through failures and surfacing what happened.
 
 ---
 
-## Architecture (target)
+## Architecture
 
 ```
-Producer ──POST /events──> Ingest API ──(single txn)──> Postgres (events + outbox)
-                                                              │
-                                                     Outbox Poller (SKIP LOCKED)
-                                                              │
-                                                          AWS SQS            ← Milestone 2
-                                                              │
-                                                     Dispatcher Workers
-                                                              │
-                                          HMAC-signed HTTP POST ──> Subscriber
-                                                              │
-                                             retries → DLQ → replay          ← Milestone 2
+Producer -POST /events-> API -(single txn)-> Postgres (events + outbox)
+                                                   |
+                         +-------------- eventrelay-dispatcher --------------+
+                         |  OutboxRelay (SKIP LOCKED) -> deliveries table    |
+                         |  DeliveryScheduler (due rows) -> publish          |
+                         |                                   |               |
+                         |                               AWS SQS             |
+                         |                                   |               |
+                         |  DeliveryWorker (consumer) <------+               |
+                         |     HMAC-signed HTTP POST -> subscriber           |
+                         |     2xx        -> DELIVERED                        |
+                         |     5xx/timeout-> RETRYING (backoff + jitter)      |
+                         |     4xx/exhaust-> DLQ -> replay                    |
+                         +---------------------------------------------------+
 ```
 
-The keystone is the **transactional outbox pattern**: an event and its outbox row
-are written in one database transaction, so an accepted event can never be lost
-between the API and the delivery pipeline (no dual-write problem).
+Two keystones:
+- **Transactional outbox** — an event and its outbox row are written in one DB
+  transaction, so an accepted event is never lost before the delivery pipeline
+  (no dual-write problem).
+- **DB-driven retry scheduling** — retry timing lives in `deliveries.next_attempt_at`,
+  not in the SQS message, so backoff isn't capped by the SQS 15-minute delay limit.
+  SQS is pure work distribution.
 
 ### Modules
 
 | Module | Deployable | Responsibility |
 |--------|-----------|----------------|
-| `eventrelay-common` | library | Crypto (API-key hashing), ID/secret generation |
+| `eventrelay-common` | library | Crypto (API-key hashing, **HMAC signing**), **backoff calculator** |
 | `eventrelay-core`   | library | JPA domain model, repositories, core services, Flyway schema |
-| `eventrelay-api`    | Spring Boot app | REST API + (M1) outbox poller & HTTP dispatcher |
+| `eventrelay-api`    | Spring Boot app (`:8080`) | REST API: ingestion, subscriptions, DLQ/replay, Redis idempotency |
+| `eventrelay-dispatcher` | Spring Boot app (`:8081`) | Outbox relay, SQS scheduler + consumer, HMAC-signed delivery, retries, DLQ |
 
 ---
 
 ## Milestone status
 
-- [x] **M1 — Core pipeline (done).** Multi-module build, Postgres schema (Flyway),
+- [x] **M1 — Core pipeline.** Multi-module build, Postgres schema (Flyway),
       API-key auth, tenant & subscription management, event ingestion with
       idempotency, transactional outbox, `SELECT FOR UPDATE SKIP LOCKED` poller,
-      single-attempt HTTP delivery, delivery-attempt audit trail.
-- [ ] **M2 — Reliability.** Extract `eventrelay-dispatcher`, AWS SQS (LocalStack),
-      exponential backoff + jitter, DLQ + replay, HMAC-SHA256 signing, Redis idempotency.
+      HTTP delivery, delivery-attempt audit trail.
+- [x] **M2 — Reliability.** Separate `eventrelay-dispatcher` deployable; AWS SQS
+      (LocalStack locally); per-(event×subscription) delivery state machine;
+      exponential backoff + jitter; dead-letter queue with list + replay;
+      HMAC-SHA256 request signing; Redis-backed idempotency fast-path;
+      lease-based reclaim of stuck in-flight deliveries.
 - [ ] **M3 — Production polish.** Per-tenant rate limiting, circuit breakers,
       Prometheus/Grafana, Testcontainers integration tests, a chaos test proving zero loss.
 - [ ] **M4 — Deploy & showcase.** Dockerfiles, GitHub Actions CI, deploy to a
       DigitalOcean droplet (+ real AWS SQS), Terraform/ECS configs as artifacts.
 
-### M1 deliberate simplifications (revisited later)
+### Deliberate simplifications (revisited later)
 - Status columns are `VARCHAR + CHECK` rather than native PG `ENUM` types (cleaner JPA mapping).
 - `events` / `delivery_attempts` are not range-partitioned yet (added in M3).
-- The poller and HTTP dispatcher run inside `eventrelay-api`; they become a
-  separate SQS-driven worker in M2.
 - Tenant creation is unauthenticated (bootstrap/admin action).
+- The API service owns Flyway migrations; the dispatcher validates the schema (`ddl-auto=validate`).
 
 ---
 
@@ -72,52 +82,76 @@ JDK 17, Maven 3.8+, Docker Desktop.
 
 ### 1. Start infrastructure
 ```bash
-docker compose up -d postgres
-# redis + localstack are defined too, used from Milestone 2
+docker compose up -d postgres redis localstack
 ```
 
-### 2. Build & run the API
+### 2. Build
 ```bash
 mvn -DskipTests clean install
-java -jar eventrelay-api/target/eventrelay-api.jar
-# API on http://localhost:8080  (health: /actuator/health)
 ```
 
-### 3. Try the pipeline
+### 3. Run both services (two terminals)
+```bash
+# Terminal 1 — API (runs DB migrations on startup)
+java -jar eventrelay-api/target/eventrelay-api.jar          # http://localhost:8080
+
+# Terminal 2 — dispatcher (creates the SQS queue, starts workers)
+java -jar eventrelay-dispatcher/target/eventrelay-dispatcher.jar   # http://localhost:8081
+```
+Start the API first so the schema exists before the dispatcher validates it.
+
+### 4. Try the pipeline
 ```bash
 # Create a tenant (returns an API key — shown once)
 curl -s -X POST http://localhost:8080/api/v1/tenants \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"Acme","slug":"acme"}'
+  -H 'Content-Type: application/json' -d '{"name":"Acme","slug":"acme"}'
 
 KEY=er_live_...   # from the response above
 
-# Create a subscription
+# Subscribe (http allowed locally; https enforced in production)
 curl -s -X POST http://localhost:8080/api/v1/subscriptions \
   -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
   -d '{"targetUrl":"https://your-endpoint.example/webhooks","eventTypes":["payment.completed"]}'
 
-# Ingest an event (delivered asynchronously by the poller)
+# Ingest an event (delivered asynchronously, HMAC-signed)
 curl -s -X POST http://localhost:8080/api/v1/events \
   -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
   -H 'Idempotency-Key: idk-001' \
   -d '{"eventType":"payment.completed","data":{"amount":9999,"currency":"USD"}}'
 
-# Inspect delivery attempts for the event
-curl -s http://localhost:8080/api/v1/events/{eventId}/deliveries \
-  -H "Authorization: Bearer $KEY"
+# Inspect delivery attempts, or the dead-letter queue
+curl -s http://localhost:8080/api/v1/events/{eventId}/deliveries -H "Authorization: Bearer $KEY"
+curl -s http://localhost:8080/api/v1/dead-letter -H "Authorization: Bearer $KEY"
 ```
+
+### Verifying the HMAC signature (receiver side)
+Each delivery carries `X-EventRelay-Signature: v1=<hex>` and `X-EventRelay-Timestamp`.
+Recompute `HMAC_SHA256(signing_secret, timestamp + "." + rawBody)` and compare in
+constant time; reject if the timestamp is more than 5 minutes old.
 
 ---
 
-## API (Milestone 1)
+## API
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | `POST` | `/api/v1/tenants` | — | Create tenant, returns API key once |
-| `POST` | `/api/v1/subscriptions` | Bearer | Create a subscription |
+| `POST` | `/api/v1/subscriptions` | Bearer | Create a subscription (returns signing secret) |
 | `GET`  | `/api/v1/subscriptions` | Bearer | List subscriptions |
-| `POST` | `/api/v1/events` | Bearer | Ingest an event (`202` accepted, `200` if idempotent replay) |
+| `POST` | `/api/v1/events` | Bearer | Ingest an event (`202` accepted, `200` idempotent replay) |
 | `GET`  | `/api/v1/events/{id}` | Bearer | Get an event |
 | `GET`  | `/api/v1/events/{id}/deliveries` | Bearer | Delivery-attempt history |
-| `GET`  | `/actuator/health` | — | Health check |
+| `POST` | `/api/v1/events/{id}/replay` | Bearer | Re-queue dead-lettered deliveries for an event |
+| `GET`  | `/api/v1/dead-letter` | Bearer | List dead-lettered events (paginated) |
+| `GET`  | `/actuator/health` | — | Health check (both services) |
+
+### Webhook delivery headers
+```
+Content-Type: application/json
+User-Agent: EventRelay/1.0
+X-Event-ID: <event uuid>
+X-Event-Type: <event type>
+X-EventRelay-Attempt: <n>
+X-EventRelay-Timestamp: <unix seconds>
+X-EventRelay-Signature: v1=<hex hmac-sha256>
+```

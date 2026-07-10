@@ -40,7 +40,7 @@ services:
     ports:
       - "4566:4566"
     healthcheck:
-      test: ["CMD-SHELL", "awslocal sqs list-queues || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:4566/_localstack/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
