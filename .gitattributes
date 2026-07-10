@@ -1,0 +1,7 @@
+# Normalize line endings: store text as LF in the repo.
+* text=auto eol=lf
+
+# Binary types git should not touch
+*.jar binary
+*.png binary
+*.jpg binary

@@ -1,0 +1,47 @@
+spring:
+  application:
+    name: eventrelay-api
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/eventrelay}
+    username: ${DB_USERNAME:eventrelay}
+    password: ${DB_PASSWORD:eventrelay}
+    hikari:
+      maximum-pool-size: 10
+      pool-name: eventrelay-pool
+  jpa:
+    hibernate:
+      ddl-auto: validate          # schema is owned by Flyway, never by Hibernate
+    open-in-view: false
+    properties:
+      hibernate.jdbc.time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, prometheus
+  endpoint:
+    health:
+      show-details: always
+      group:
+        readiness:
+          include: db
+        liveness:
+          include: ping
+
+eventrelay:
+  dispatch:
+    poll-interval-ms: 500         # outbox polling cadence
+    batch-size: 50                # rows claimed per poll
+    http-timeout-ms: 30000        # per-delivery HTTP timeout
+
+logging:
+  level:
+    com.eventrelay: DEBUG
