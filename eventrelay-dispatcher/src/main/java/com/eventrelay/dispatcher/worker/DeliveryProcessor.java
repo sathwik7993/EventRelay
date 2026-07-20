@@ -9,6 +9,7 @@ import com.eventrelay.core.repository.EventRepository;
 import com.eventrelay.core.repository.SubscriptionRepository;
 import com.eventrelay.core.service.DeliveryResult;
 import com.eventrelay.core.service.DeliveryService;
+import com.eventrelay.core.service.TargetUrlValidator;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,16 +34,19 @@ public class DeliveryProcessor {
     private final EventRepository events;
     private final HttpDeliveryClient httpClient;
     private final DeliveryService deliveryService;
+    private final TargetUrlValidator targetUrlValidator;
     private final MeterRegistry metrics;
 
     public DeliveryProcessor(DeliveryRepository deliveries, SubscriptionRepository subscriptions,
                              EventRepository events, HttpDeliveryClient httpClient,
-                             DeliveryService deliveryService, MeterRegistry metrics) {
+                             DeliveryService deliveryService, TargetUrlValidator targetUrlValidator,
+                             MeterRegistry metrics) {
         this.deliveries = deliveries;
         this.subscriptions = subscriptions;
         this.events = events;
         this.httpClient = httpClient;
         this.deliveryService = deliveryService;
+        this.targetUrlValidator = targetUrlValidator;
         this.metrics = metrics;
     }
 
@@ -68,6 +72,15 @@ public class DeliveryProcessor {
         if (event == null) {
             recordDlq(deliveryService.recordFailure(delivery, subscription, true, null,
                     "Source event no longer exists", EMPTY_PAYLOAD));
+            return;
+        }
+
+        // Re-check the SSRF policy at delivery time: DNS can change between when a
+        // subscription was created and when we actually send (DNS rebinding).
+        if (!targetUrlValidator.isAllowed(delivery.getTargetUrl())) {
+            metrics.counter("eventrelay.delivery.blocked").increment();
+            recordDlq(deliveryService.recordFailure(delivery, subscription, true, null,
+                    "Target URL blocked by SSRF policy", event.getPayload()));
             return;
         }
 

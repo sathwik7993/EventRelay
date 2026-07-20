@@ -46,6 +46,20 @@ eventrelay:
     ttl-hours: 24                 # Redis dedup-cache TTL for Idempotency-Key
   rate-limit:
     default-rps: 100              # per-tenant token-bucket rate (override via tenant settings)
+  security:
+    # SSRF guard on subscription target URLs. Secure by default; set both to true
+    # for local development so subscriptions can point at a receiver on localhost.
+    allow-insecure-target-urls: ${ALLOW_INSECURE_TARGET_URLS:false}
+    allow-private-target-urls: ${ALLOW_PRIVATE_TARGET_URLS:false}
+  auth:
+    # bcrypt is ~300ms of CPU per verification; cache successful verifications so
+    # it is not paid on every request. Revocation takes effect within this window.
+    cache-ttl-seconds: 60
+    cache-max-entries: 10000
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
 
 logging:
   level:

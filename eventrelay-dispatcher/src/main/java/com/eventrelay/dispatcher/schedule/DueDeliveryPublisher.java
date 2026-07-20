@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -30,12 +31,20 @@ public class DueDeliveryPublisher {
     @Transactional
     public int publishDue(int limit) {
         List<Delivery> due = deliveries.claimDue(OffsetDateTime.now(), limit);
+        if (due.isEmpty()) {
+            return 0;
+        }
+
+        OffsetDateTime leasedAt = OffsetDateTime.now();
+        List<String> ids = new ArrayList<>(due.size());
         for (Delivery delivery : due) {
             delivery.setStatus(DeliveryState.QUEUED);
-            delivery.setLeasedAt(OffsetDateTime.now());
+            delivery.setLeasedAt(leasedAt);
             deliveries.save(delivery);
-            queue.publish(delivery.getId().toString());
+            ids.add(delivery.getId().toString());
         }
+        // One batched publish instead of one call per delivery.
+        queue.publishBatch(ids);
         return due.size();
     }
 }

@@ -1,6 +1,6 @@
 package com.eventrelay.core.service;
 
-import com.eventrelay.common.util.Ids;
+import com.eventrelay.common.crypto.SigningSecrets;
 import com.eventrelay.core.domain.Subscription;
 import com.eventrelay.core.domain.SubscriptionStatus;
 import com.eventrelay.core.repository.SubscriptionRepository;
@@ -14,14 +14,20 @@ import java.util.UUID;
 public class SubscriptionService {
 
     private final SubscriptionRepository subscriptions;
+    private final TargetUrlValidator targetUrlValidator;
 
-    public SubscriptionService(SubscriptionRepository subscriptions) {
+    public SubscriptionService(SubscriptionRepository subscriptions,
+                               TargetUrlValidator targetUrlValidator) {
         this.subscriptions = subscriptions;
+        this.targetUrlValidator = targetUrlValidator;
     }
 
     @Transactional
     public Subscription create(UUID tenantId, String targetUrl, String[] eventTypes, String description) {
-        String signingSecret = Ids.prefixed("whsec", 32);
+        // SSRF guard: reject internal/private targets before we ever store them.
+        targetUrlValidator.validate(targetUrl);
+
+        String signingSecret = SigningSecrets.generate();
         Subscription subscription = new Subscription(
                 UUID.randomUUID(), tenantId, targetUrl, eventTypes, signingSecret);
         subscription.setDescription(description);

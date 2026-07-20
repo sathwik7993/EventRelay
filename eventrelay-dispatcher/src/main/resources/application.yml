@@ -53,6 +53,10 @@ eventrelay:
   circuit:
     failure-threshold: 5          # consecutive failures before a subscription's circuit opens
     cooldown-seconds: 30          # how long to skip deliveries while open
+  security:
+    # Re-checked at delivery time (DNS rebinding defence). Must match the API's setting.
+    allow-insecure-target-urls: ${ALLOW_INSECURE_TARGET_URLS:false}
+    allow-private-target-urls: ${ALLOW_PRIVATE_TARGET_URLS:false}
 
 logging:
   level:

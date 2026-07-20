@@ -1,5 +1,6 @@
 package com.eventrelay.api.web;
 
+import com.eventrelay.core.service.InvalidTargetUrlException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -23,6 +24,11 @@ public class GlobalExceptionHandler {
                         f -> f.getDefaultMessage() == null ? "invalid" : f.getDefaultMessage(),
                         (a, b) -> a));
         return body(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "Request validation failed", fields);
+    }
+
+    @ExceptionHandler(InvalidTargetUrlException.class)
+    public ResponseEntity<Map<String, Object>> handleInvalidTargetUrl(InvalidTargetUrlException ex) {
+        return body(HttpStatus.BAD_REQUEST, "INVALID_TARGET_URL", ex.getMessage(), null);
     }
 
     @ExceptionHandler(ResponseStatusException.class)

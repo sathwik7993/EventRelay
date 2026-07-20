@@ -11,6 +11,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 import software.amazon.awssdk.services.sqs.model.Message;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -54,8 +55,15 @@ public class DeliveryWorker {
         while (running) {
             try {
                 List<Message> messages = queue.receive();
+                List<String> processed = new ArrayList<>(messages.size());
                 for (Message message : messages) {
-                    handle(message);
+                    if (handle(message)) {
+                        processed.add(message.receiptHandle());
+                    }
+                }
+                // Batch-acknowledge everything that completed, instead of one call each.
+                if (!processed.isEmpty()) {
+                    queue.deleteBatch(processed);
                 }
             } catch (Exception e) {
                 if (running) {
@@ -66,14 +74,16 @@ public class DeliveryWorker {
         }
     }
 
-    private void handle(Message message) {
+    /** @return true if the message was processed and should be acknowledged. */
+    private boolean handle(Message message) {
         MDC.put("deliveryId", message.body());
         try {
             processor.process(message.body());
-            queue.delete(message.receiptHandle());
+            return true;
         } catch (Exception e) {
             // Leave the message on the queue; it reappears after the visibility timeout.
             log.error("Failed to process delivery {}; will be redelivered", message.body(), e);
+            return false;
         } finally {
             MDC.remove("deliveryId");
         }

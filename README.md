@@ -38,6 +38,22 @@ Producer -POST /events-> API -(single txn)-> Postgres (events + outbox)
                          +---------------------------------------------------+
 ```
 
+## Measured performance
+
+| Metric | Result |
+|---|---|
+| Ingest throughput | **1,117 events/s** (50 concurrent, 0% errors) |
+| Ingest latency | p95 **75.6 ms**, p99 **89.5 ms** |
+| Per-delivery cost | **4.09 ms** |
+| Zero event loss under `kill -9` mid-flight | ✅ 150/150 delivered |
+
+Load testing surfaced two bottlenecks that functional tests never would:
+**bcrypt on every request** (21 → 1,117 req/s, 53×) and **unbatched SQS publishes**
+(4.4× on end-to-end drain). Full methodology, before/after numbers, and honest
+caveats in **[BENCHMARKS.md](./BENCHMARKS.md)**.
+
+---
+
 Two keystones:
 - **Transactional outbox** — an event and its outbox row are written in one DB
   transaction, so an accepted event is never lost before the delivery pipeline
@@ -77,6 +93,10 @@ Two keystones:
       single-host production stack (`docker-compose.prod.yml`), GitHub Actions CI
       (build + Testcontainers tests + image builds), a Terraform ECS Fargate
       reference architecture, and a deployment guide.
+- [x] **M5 — Standards, hardening & benchmarks.** SSRF protection on target URLs,
+      [Standard Webhooks](https://www.standardwebhooks.com/) signature compliance,
+      OpenAPI/Swagger UI, and measured k6 benchmarks that uncovered and fixed two
+      real bottlenecks (see [BENCHMARKS.md](./BENCHMARKS.md)).
 
 ### Deliberate simplifications (revisited later)
 - Status columns are `VARCHAR + CHECK` rather than native PG `ENUM` types (cleaner JPA mapping).
@@ -201,12 +221,41 @@ production design of record — the same images deploy to either target because 
 configuration is environment-variable driven.
 
 ### Webhook delivery headers
+
+Deliveries are signed two ways: the [Standard Webhooks](https://www.standardwebhooks.com/)
+headers (the spec adopted by OpenAI, Anthropic, Twilio, Svix and others — so any
+off-the-shelf verification library works), plus the original EventRelay headers for
+backwards compatibility.
+
 ```
 Content-Type: application/json
 User-Agent: EventRelay/1.0
+
+# Standard Webhooks
+webhook-id: <message uuid>
+webhook-timestamp: <unix seconds>
+webhook-signature: v1,<base64 hmac-sha256>
+
+# EventRelay legacy
 X-Event-ID: <event uuid>
 X-Event-Type: <event type>
 X-EventRelay-Attempt: <n>
 X-EventRelay-Timestamp: <unix seconds>
 X-EventRelay-Signature: v1=<hex hmac-sha256>
 ```
+
+Signing secrets are issued in spec format (`whsec_<base64>`). Standard Webhooks signs
+`"{webhook-id}.{webhook-timestamp}.{body}"`; the legacy header signs
+`"{timestamp}.{body}"`.
+
+### Security
+
+| Control | Implementation |
+|---|---|
+| **SSRF protection** | Target URLs are rejected if they use plain HTTP or resolve to loopback, private (10/8, 172.16/12, 192.168/16), link-local, CGNAT, IPv6 ULA, or the cloud metadata endpoint (169.254.169.254). Enforced at subscription creation **and** re-checked at delivery time (DNS-rebinding defence). Relaxable only via explicit dev flags. |
+| **API keys** | Random 190-bit secrets, bcrypt-hashed at rest, looked up by non-secret prefix, verified in constant time, then cached briefly (see BENCHMARKS.md §2.1) |
+| **Payload integrity** | HMAC-SHA256 with per-subscription secrets and a timestamp for replay protection |
+| **Tenant isolation** | Every query is tenant-scoped; cross-tenant reads return 404 rather than leaking existence |
+
+### API docs
+Interactive Swagger UI at `/swagger-ui.html`, OpenAPI JSON at `/v3/api-docs`.

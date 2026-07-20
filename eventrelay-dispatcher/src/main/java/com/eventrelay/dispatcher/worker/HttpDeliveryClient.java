@@ -1,6 +1,7 @@
 package com.eventrelay.dispatcher.worker;
 
 import com.eventrelay.common.crypto.HmacSigner;
+import com.eventrelay.common.crypto.StandardWebhookSigner;
 import com.eventrelay.core.domain.Delivery;
 import com.eventrelay.core.domain.DeliveryAttempt;
 import com.eventrelay.core.domain.DeliveryStatus;
@@ -61,7 +62,12 @@ public class HttpDeliveryClient {
                                    Event event, int attemptNumber) {
         String body = buildEnvelope(event);
         long timestamp = Instant.now().getEpochSecond();
+        String messageId = event.getId().toString();
         String signature = HmacSigner.sign(subscription.getSigningSecret(), timestamp, body);
+        // Standard Webhooks (standardwebhooks.com) signature, emitted alongside the
+        // legacy header so off-the-shelf verification libraries work as-is.
+        String standardSignature = StandardWebhookSigner.sign(
+                subscription.getSigningSecret(), messageId, timestamp, body);
 
         DeliveryAttempt attempt = new DeliveryAttempt(event.getId(), subscription.getId(),
                 delivery.getTenantId(), attemptNumber, DeliveryStatus.FAILED, delivery.getTargetUrl());
@@ -79,6 +85,10 @@ public class HttpDeliveryClient {
                     .header("X-EventRelay-Attempt", Integer.toString(attemptNumber))
                     .header("X-EventRelay-Timestamp", Long.toString(timestamp))
                     .header("X-EventRelay-Signature", signature)
+                    // Standard Webhooks headers
+                    .header("webhook-id", messageId)
+                    .header("webhook-timestamp", Long.toString(timestamp))
+                    .header("webhook-signature", standardSignature)
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();
 
