@@ -3,7 +3,10 @@ package com.eventrelay.api.web;
 import com.eventrelay.api.idempotency.RedisIdempotencyCache;
 import com.eventrelay.api.ratelimit.RateLimiter;
 import com.eventrelay.api.security.ApiKeyAuthFilter;
+import com.eventrelay.api.tracing.TraceMetadataWriter;
 import com.eventrelay.api.web.dto.EventDtos.DeliveryAttemptResponse;
+import com.eventrelay.api.web.dto.EventDtos.EventPage;
+import com.eventrelay.api.web.dto.EventDtos.EventSummary;
 import com.eventrelay.api.web.dto.EventDtos.IngestEventRequest;
 import com.eventrelay.api.web.dto.EventDtos.IngestEventResponse;
 import com.eventrelay.api.web.dto.EventDtos.ReplayResponse;
@@ -23,11 +26,15 @@ import com.eventrelay.core.service.IngestionService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.validation.Valid;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestAttribute;
@@ -54,6 +61,7 @@ public class EventController {
     private final RedisIdempotencyCache idempotencyCache;
     private final RateLimiter rateLimiter;
     private final MeterRegistry metrics;
+    private final TraceMetadataWriter traceMetadataWriter;
     private final ObjectMapper objectMapper;
 
     public EventController(IngestionService ingestion, EventRepository events,
@@ -64,6 +72,7 @@ public class EventController {
                            RedisIdempotencyCache idempotencyCache,
                            RateLimiter rateLimiter,
                            MeterRegistry metrics,
+                           TraceMetadataWriter traceMetadataWriter,
                            ObjectMapper objectMapper) {
         this.ingestion = ingestion;
         this.events = events;
@@ -74,6 +83,7 @@ public class EventController {
         this.idempotencyCache = idempotencyCache;
         this.rateLimiter = rateLimiter;
         this.metrics = metrics;
+        this.traceMetadataWriter = traceMetadataWriter;
         this.objectMapper = objectMapper;
     }
 
@@ -104,7 +114,13 @@ public class EventController {
         }
 
         String payloadJson = toJson(request.data());
-        String metadataJson = request.metadata() != null ? toJson(request.metadata()) : "{}";
+        // Carry the current trace context with the event so the dispatcher can
+        // continue the same trace when it delivers, minutes or retries later.
+        ObjectNode metadata = request.metadata() != null && request.metadata().isObject()
+                ? ((ObjectNode) request.metadata()).deepCopy()
+                : objectMapper.createObjectNode();
+        traceMetadataWriter.writeInto(metadata);
+        String metadataJson = toJson(metadata);
 
         IngestResult result = ingestion.ingest(tenant.getId(),
                 new IngestCommand(request.eventType(), idempotencyKey, payloadJson, metadataJson));
@@ -117,6 +133,26 @@ public class EventController {
 
         HttpStatus status = result.duplicate() ? HttpStatus.OK : HttpStatus.ACCEPTED;
         return ResponseEntity.status(status).body(response(result.event(), result.duplicate()));
+    }
+
+    /** Paginated event log for the tenant, newest first. */
+    @GetMapping
+    public EventPage list(
+            @RequestAttribute(ApiKeyAuthFilter.TENANT_ATTRIBUTE) Tenant tenant,
+            @RequestParam(required = false) String eventType,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        PageRequest pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100));
+        Page<Event> result = (eventType == null || eventType.isBlank())
+                ? events.findByTenantIdOrderByCreatedAtDesc(tenant.getId(), pageable)
+                : events.findByTenantIdAndEventTypeOrderByCreatedAtDesc(tenant.getId(), eventType, pageable);
+
+        return new EventPage(
+                result.getContent().stream()
+                        .map(e -> new EventSummary(e.getId(), e.getEventType(),
+                                e.getIdempotencyKey(), e.getCreatedAt()))
+                        .toList(),
+                result.getNumber(), result.getSize(), result.getTotalElements());
     }
 
     @GetMapping("/{id}")

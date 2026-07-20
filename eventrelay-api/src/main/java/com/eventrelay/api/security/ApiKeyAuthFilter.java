@@ -28,7 +28,8 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
     private static final String[] PROTECTED_PREFIXES = {
             "/api/v1/events",
             "/api/v1/subscriptions",
-            "/api/v1/dead-letter"
+            "/api/v1/dead-letter",
+            "/api/v1/stats"
     };
 
     private final AuthenticationService authentication;

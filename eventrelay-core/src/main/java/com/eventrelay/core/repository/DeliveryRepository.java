@@ -42,4 +42,9 @@ public interface DeliveryRepository extends JpaRepository<Delivery, UUID> {
     List<Delivery> claimStaleQueued(@Param("cutoff") OffsetDateTime cutoff, @Param("limit") int limit);
 
     List<Delivery> findByEventIdOrderByCreatedAtAsc(UUID eventId);
+
+    /** Delivery counts grouped by status, for dashboard tiles. */
+    @Query(value = "SELECT status, count(*) FROM deliveries WHERE tenant_id = :tenantId GROUP BY status",
+            nativeQuery = true)
+    List<Object[]> countByStatusForTenant(@Param("tenantId") UUID tenantId);
 }

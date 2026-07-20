@@ -80,5 +80,14 @@ services:
     ports:
       - "8081:8081"
 
+  dashboard:
+    build:
+      context: ./eventrelay-dashboard
+    restart: unless-stopped
+    depends_on:
+      api: { condition: service_healthy }
+    ports:
+      - "80:80"
+
 volumes:
   pgdata:

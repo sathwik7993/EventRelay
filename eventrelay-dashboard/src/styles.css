@@ -1,0 +1,500 @@
+/* =====================================================================
+   EventRelay Console — "Liquid Glass + Claymorphism", light theme.
+
+   Two material languages, layered deliberately:
+   - LIQUID GLASS: translucent surfaces, heavy backdrop blur + saturation,
+     a specular highlight along the top edge, hairline light borders.
+     Used for anything that floats (rail, cards, bars, modals).
+   - CLAYMORPHISM: opaque, puffy, rounded forms with a soft double shadow
+     (cool shadow bottom-right, white light top-left) and inset shaping.
+     Used for anything you touch (buttons, tiles, pills, inputs).
+   ===================================================================== */
+
+:root {
+  /* Pastel field the glass floats over */
+  --bg-base: #f4f6ff;
+  --blob-violet: #c7d2fe;
+  --blob-rose: #fbcfe8;
+  --blob-mint: #a7f3d0;
+  --blob-peach: #fed7aa;
+
+  /* Ink */
+  --ink: #1e2438;
+  --ink-soft: #5b6480;
+  --ink-faint: #8b93ab;
+
+  /* Accents */
+  --primary: #6366f1;
+  --primary-deep: #4338ca;
+  --success: #059669;
+  --success-soft: #d1fae5;
+  --warn: #b45309;
+  --warn-soft: #fef3c7;
+  --danger: #be123c;
+  --danger-soft: #ffe4e6;
+  --info-soft: #e0e7ff;
+
+  /* Glass */
+  --glass: rgba(255, 255, 255, 0.55);
+  --glass-strong: rgba(255, 255, 255, 0.72);
+  --glass-edge: rgba(255, 255, 255, 0.85);
+  --glass-blur: blur(26px) saturate(180%);
+
+  /* Clay */
+  --clay: #f2f4fd;
+  --clay-dark: rgba(133, 144, 180, 0.40);
+  --clay-light: rgba(255, 255, 255, 0.95);
+
+  --radius-xl: 32px;
+  --radius-lg: 24px;
+  --radius-md: 18px;
+  --radius-sm: 12px;
+
+  --shadow-float:
+    0 18px 40px -18px rgba(60, 72, 130, 0.35),
+    0 4px 12px -6px rgba(60, 72, 130, 0.18);
+
+  /* Glass specular: bright top edge, faint bottom shade */
+  --glass-inset:
+    inset 0 1px 1px rgba(255, 255, 255, 0.95),
+    inset 0 -1px 1px rgba(120, 132, 175, 0.12);
+
+  /* Clay relief */
+  --clay-relief:
+    7px 7px 18px var(--clay-dark),
+    -6px -6px 16px var(--clay-light),
+    inset 1px 1px 2px rgba(255, 255, 255, 0.85),
+    inset -1px -1px 3px rgba(133, 144, 180, 0.16);
+
+  --clay-pressed:
+    inset 5px 5px 12px rgba(133, 144, 180, 0.42),
+    inset -4px -4px 10px rgba(255, 255, 255, 0.92);
+
+  --font: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --mono: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  color: var(--ink);
+  background: var(--bg-base);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* ---------------------------------------------------------------
+   Ambient field: slow-drifting pastel blobs behind the glass.
+   This is what makes backdrop-filter read as "liquid" — the blur
+   needs something colourful and moving to refract.
+   --------------------------------------------------------------- */
+.field {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  z-index: 0;
+}
+
+.blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(70px);
+  opacity: 0.75;
+  will-change: transform;
+}
+
+.blob-1 { width: 46vw; height: 46vw; background: var(--blob-violet); top: -12vw; left: -8vw;  animation: drift-a 26s ease-in-out infinite; }
+.blob-2 { width: 38vw; height: 38vw; background: var(--blob-rose);   bottom: -14vw; right: -6vw; animation: drift-b 32s ease-in-out infinite; }
+.blob-3 { width: 30vw; height: 30vw; background: var(--blob-mint);   top: 32%; right: 18%;      animation: drift-c 24s ease-in-out infinite; }
+.blob-4 { width: 24vw; height: 24vw; background: var(--blob-peach);  bottom: 12%; left: 22%;    animation: drift-a 30s ease-in-out infinite reverse; }
+
+@keyframes drift-a { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(6vw, 5vh) scale(1.12); } }
+@keyframes drift-b { 0%,100% { transform: translate(0,0) scale(1.05); } 50% { transform: translate(-7vw,-4vh) scale(0.95); } }
+@keyframes drift-c { 0%,100% { transform: translate(0,0); } 50% { transform: translate(-5vw, 6vh); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .blob { animation: none; }
+}
+
+/* ---------------------------------------------------------------
+   Shell
+   --------------------------------------------------------------- */
+.shell {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  display: grid;
+  grid-template-columns: 244px 1fr;
+  gap: 20px;
+  padding: 20px;
+}
+
+/* --- Glass surface mixin --- */
+.glass {
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-edge);
+  box-shadow: var(--shadow-float), var(--glass-inset);
+}
+
+/* ---------------------------------------------------------------
+   Left rail
+   --------------------------------------------------------------- */
+.rail {
+  border-radius: var(--radius-xl);
+  padding: 26px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  overflow: hidden;
+}
+
+.brand { display: flex; align-items: center; gap: 12px; padding: 0 6px; }
+
+.brand-mark {
+  width: 42px; height: 42px;
+  border-radius: 14px;
+  display: grid; place-items: center;
+  background: linear-gradient(145deg, #818cf8, #4f46e5);
+  box-shadow: 5px 5px 12px rgba(79, 70, 229, 0.35),
+              -3px -3px 10px rgba(255,255,255,0.9),
+              inset 1px 1px 2px rgba(255,255,255,0.5);
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.brand-name { font-weight: 700; font-size: 16px; letter-spacing: -0.02em; line-height: 1.1; }
+.brand-sub { font-size: 11px; color: var(--ink-faint); font-weight: 500; }
+
+.nav { display: flex; flex-direction: column; gap: 8px; }
+
+.nav-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--ink-soft);
+  font: inherit; font-size: 14px; font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  transition: color .18s ease, background .18s ease, transform .18s ease, box-shadow .22s ease;
+}
+
+.nav-item:hover { color: var(--ink); background: rgba(255,255,255,0.5); }
+
+/* Active nav = clay pill, pressed into the rail */
+.nav-item.active {
+  color: var(--primary-deep);
+  background: var(--clay);
+  box-shadow: var(--clay-relief);
+  transform: translateY(-1px);
+}
+
+.nav-item svg { flex-shrink: 0; }
+
+.rail-foot { margin-top: auto; }
+
+/* ---------------------------------------------------------------
+   Main column
+   --------------------------------------------------------------- */
+.main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  overflow: hidden;
+}
+
+.topbar {
+  border-radius: var(--radius-lg);
+  padding: 16px 22px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-shrink: 0;
+}
+
+.topbar h1 { margin: 0; font-size: 19px; font-weight: 700; letter-spacing: -0.02em; }
+.topbar p { margin: 2px 0 0; font-size: 12.5px; color: var(--ink-faint); }
+.topbar-spacer { margin-left: auto; }
+
+.content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.content::-webkit-scrollbar { width: 10px; }
+.content::-webkit-scrollbar-thumb {
+  background: rgba(148,163,184,0.4);
+  border-radius: 99px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+/* ---------------------------------------------------------------
+   Clay controls
+   --------------------------------------------------------------- */
+.btn {
+  border: none;
+  border-radius: var(--radius-md);
+  padding: 11px 18px;
+  font: inherit; font-size: 13.5px; font-weight: 650;
+  color: var(--ink);
+  background: var(--clay);
+  box-shadow: var(--clay-relief);
+  cursor: pointer;
+  display: inline-flex; align-items: center; gap: 8px;
+  transition: transform .16s ease, box-shadow .18s ease, color .16s ease;
+}
+.btn:hover { transform: translateY(-2px); }
+.btn:active { transform: translateY(1px); box-shadow: var(--clay-pressed); }
+.btn:disabled { opacity: .55; cursor: not-allowed; transform: none; }
+
+.btn-primary {
+  color: #fff;
+  background: linear-gradient(145deg, #818cf8, #4f46e5);
+  box-shadow: 7px 7px 18px rgba(79,70,229,0.34),
+              -5px -5px 14px rgba(255,255,255,0.85),
+              inset 1px 1px 2px rgba(255,255,255,0.45),
+              inset -1px -1px 3px rgba(49,46,129,0.35);
+}
+
+.btn-sm { padding: 8px 14px; font-size: 12.5px; border-radius: var(--radius-sm); }
+
+.input {
+  width: 100%;
+  border: none;
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  font: inherit; font-size: 13.5px;
+  color: var(--ink);
+  background: var(--clay);
+  box-shadow: var(--clay-pressed);
+  outline: none;
+  transition: box-shadow .2s ease;
+}
+.input::placeholder { color: var(--ink-faint); }
+.input:focus {
+  box-shadow: var(--clay-pressed), 0 0 0 3px rgba(99,102,241,0.28);
+}
+
+label.field-label {
+  display: block;
+  font-size: 12px; font-weight: 650;
+  color: var(--ink-soft);
+  margin: 0 0 7px 4px;
+  letter-spacing: .01em;
+}
+
+/* ---------------------------------------------------------------
+   Cards
+   --------------------------------------------------------------- */
+.card {
+  border-radius: var(--radius-lg);
+  padding: 22px;
+  background: var(--glass-strong);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-edge);
+  box-shadow: var(--shadow-float), var(--glass-inset);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Specular sweep — the "liquid" tell */
+.card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 45%;
+  background: linear-gradient(180deg, rgba(255,255,255,0.5), rgba(255,255,255,0));
+  pointer-events: none;
+}
+
+.card > * { position: relative; }
+
+.card-head { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+.card-title { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
+.card-sub { margin: 2px 0 0; font-size: 12px; color: var(--ink-faint); }
+
+/* ---------------------------------------------------------------
+   Stat tiles (clay)
+   --------------------------------------------------------------- */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 16px;
+}
+
+.tile {
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  background: var(--clay);
+  box-shadow: var(--clay-relief);
+  display: flex; flex-direction: column; gap: 12px;
+  transition: transform .2s ease;
+}
+.tile:hover { transform: translateY(-3px); }
+
+.tile-icon {
+  width: 38px; height: 38px;
+  border-radius: 13px;
+  display: grid; place-items: center;
+  box-shadow: inset 1px 1px 2px rgba(255,255,255,0.7),
+              3px 3px 8px rgba(133,144,180,0.28);
+}
+.tile-icon.violet { background: var(--info-soft); color: var(--primary-deep); }
+.tile-icon.green  { background: var(--success-soft); color: var(--success); }
+.tile-icon.amber  { background: var(--warn-soft); color: var(--warn); }
+.tile-icon.rose   { background: var(--danger-soft); color: var(--danger); }
+
+.tile-value { font-size: 30px; font-weight: 750; letter-spacing: -0.035em; line-height: 1; }
+.tile-label { font-size: 12.5px; color: var(--ink-soft); font-weight: 600; }
+
+/* ---------------------------------------------------------------
+   Status breakdown meter
+   --------------------------------------------------------------- */
+.meter {
+  display: flex;
+  height: 16px;
+  border-radius: 99px;
+  overflow: hidden;
+  box-shadow: var(--clay-pressed);
+  background: var(--clay);
+}
+.meter span { transition: width .5s cubic-bezier(.4,0,.2,1); }
+.meter-legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 14px; }
+.legend-item { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--ink-soft); font-weight: 600; }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+
+/* ---------------------------------------------------------------
+   Tables
+   --------------------------------------------------------------- */
+.table-wrap { overflow-x: auto; margin: 0 -6px; padding: 0 6px; }
+
+table { width: 100%; border-collapse: separate; border-spacing: 0 8px; font-size: 13px; }
+
+thead th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--ink-faint);
+  padding: 0 14px 6px;
+  white-space: nowrap;
+}
+
+tbody tr {
+  background: rgba(255,255,255,0.62);
+  box-shadow: 0 2px 8px -4px rgba(60,72,130,0.22),
+              inset 0 1px 1px rgba(255,255,255,0.9);
+  transition: transform .16s ease, box-shadow .18s ease;
+}
+tbody tr:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px -8px rgba(60,72,130,0.32),
+              inset 0 1px 1px rgba(255,255,255,0.95);
+}
+tbody tr.clickable { cursor: pointer; }
+
+tbody td { padding: 13px 14px; vertical-align: middle; white-space: nowrap; }
+tbody td:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+tbody td:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+
+.mono { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); }
+
+/* ---------------------------------------------------------------
+   Pills
+   --------------------------------------------------------------- */
+.pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 11px;
+  border-radius: 99px;
+  font-size: 11.5px; font-weight: 700;
+  letter-spacing: .01em;
+  box-shadow: inset 1px 1px 2px rgba(255,255,255,0.75),
+              2px 2px 6px rgba(133,144,180,0.22);
+}
+.pill-green { background: var(--success-soft); color: var(--success); }
+.pill-amber { background: var(--warn-soft); color: var(--warn); }
+.pill-rose  { background: var(--danger-soft); color: var(--danger); }
+.pill-violet{ background: var(--info-soft); color: var(--primary-deep); }
+.pill-grey  { background: #e8ebf5; color: var(--ink-soft); }
+
+/* ---------------------------------------------------------------
+   Key gate (first-run screen)
+   --------------------------------------------------------------- */
+.gate {
+  position: relative; z-index: 1;
+  height: 100%;
+  display: grid; place-items: center;
+  padding: 24px;
+}
+.gate-card {
+  width: min(460px, 100%);
+  border-radius: var(--radius-xl);
+  padding: 38px;
+}
+.gate-card h2 { margin: 18px 0 6px; font-size: 22px; letter-spacing: -0.025em; }
+.gate-card p { margin: 0 0 26px; color: var(--ink-soft); font-size: 13.5px; line-height: 1.6; }
+
+/* ---------------------------------------------------------------
+   Misc
+   --------------------------------------------------------------- */
+.empty { text-align: center; padding: 46px 20px; color: var(--ink-faint); font-size: 13.5px; }
+
+.chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 14px;
+  border-radius: 99px;
+  background: var(--clay);
+  box-shadow: var(--clay-relief);
+  font-size: 12px; font-weight: 650; color: var(--ink-soft);
+}
+
+.spinner {
+  width: 17px; height: 17px;
+  border-radius: 50%;
+  border: 2.5px solid rgba(99,102,241,0.22);
+  border-top-color: var(--primary);
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.banner {
+  padding: 13px 17px;
+  border-radius: var(--radius-md);
+  font-size: 13px; font-weight: 600;
+  background: var(--danger-soft);
+  color: var(--danger);
+  box-shadow: inset 1px 1px 2px rgba(255,255,255,0.6);
+}
+.banner-ok { background: var(--success-soft); color: var(--success); }
+
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+
+.stack { display: flex; flex-direction: column; gap: 14px; }
+.row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+.fade-in { animation: fade .35s cubic-bezier(.4,0,.2,1); }
+@keyframes fade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+@media (max-width: 900px) {
+  .shell { grid-template-columns: 1fr; padding: 12px; gap: 12px; }
+  .rail { flex-direction: row; align-items: center; padding: 14px; gap: 14px; }
+  .nav { flex-direction: row; overflow-x: auto; }
+  .rail-foot { display: none; }
+  .grid-2 { grid-template-columns: 1fr; }
+}

@@ -10,7 +10,10 @@ import com.eventrelay.core.repository.SubscriptionRepository;
 import com.eventrelay.core.service.DeliveryResult;
 import com.eventrelay.core.service.DeliveryService;
 import com.eventrelay.core.service.TargetUrlValidator;
+import com.eventrelay.dispatcher.tracing.DeliveryTracer;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -35,11 +38,13 @@ public class DeliveryProcessor {
     private final HttpDeliveryClient httpClient;
     private final DeliveryService deliveryService;
     private final TargetUrlValidator targetUrlValidator;
+    private final DeliveryTracer deliveryTracer;
     private final MeterRegistry metrics;
 
     public DeliveryProcessor(DeliveryRepository deliveries, SubscriptionRepository subscriptions,
                              EventRepository events, HttpDeliveryClient httpClient,
                              DeliveryService deliveryService, TargetUrlValidator targetUrlValidator,
+                             DeliveryTracer deliveryTracer,
                              MeterRegistry metrics) {
         this.deliveries = deliveries;
         this.subscriptions = subscriptions;
@@ -47,6 +52,7 @@ public class DeliveryProcessor {
         this.httpClient = httpClient;
         this.deliveryService = deliveryService;
         this.targetUrlValidator = targetUrlValidator;
+        this.deliveryTracer = deliveryTracer;
         this.metrics = metrics;
     }
 
@@ -94,14 +100,33 @@ public class DeliveryProcessor {
         }
 
         int attemptNumber = delivery.getAttemptCount() + 1;
-        DeliveryOutcome outcome = httpClient.deliver(delivery, subscription, event, attemptNumber);
 
-        if (outcome.success()) {
-            deliveryService.recordSuccess(delivery, subscription, outcome.httpStatus());
-        } else {
-            DeliveryResult result = deliveryService.recordFailure(delivery, subscription,
-                    outcome.permanent(), outcome.httpStatus(), outcome.error(), event.getPayload());
-            recordDlq(result);
+        // Resume the trace started at ingest so this delivery is a child span.
+        Span span = deliveryTracer.startSpan(event, delivery, attemptNumber);
+        try (Tracer.SpanInScope scope = deliveryTracer.withSpan(span)) {
+            DeliveryOutcome outcome = httpClient.deliver(delivery, subscription, event, attemptNumber);
+            span.tag("delivery.success", Boolean.toString(outcome.success()));
+            if (outcome.httpStatus() != null) {
+                span.tag("http.status_code", Integer.toString(outcome.httpStatus()));
+            }
+
+            if (outcome.success()) {
+                deliveryService.recordSuccess(delivery, subscription, outcome.httpStatus());
+            } else {
+                span.error(new DeliveryFailedException(outcome.error()));
+                DeliveryResult result = deliveryService.recordFailure(delivery, subscription,
+                        outcome.permanent(), outcome.httpStatus(), outcome.error(), event.getPayload());
+                recordDlq(result);
+            }
+        } finally {
+            span.end();
+        }
+    }
+
+    /** Marker used to annotate a failed delivery span; never thrown to callers. */
+    private static final class DeliveryFailedException extends RuntimeException {
+        DeliveryFailedException(String message) {
+            super(message, null, false, false);
         }
     }
 

@@ -46,4 +46,20 @@ public final class EventDtos {
             String status
     ) {
     }
+
+    public record EventSummary(
+            UUID id,
+            String eventType,
+            String idempotencyKey,
+            OffsetDateTime createdAt
+    ) {
+    }
+
+    public record EventPage(
+            java.util.List<EventSummary> data,
+            int page,
+            int size,
+            long totalElements
+    ) {
+    }
 }

@@ -70,6 +70,7 @@ Two keystones:
 | `eventrelay-core`   | library | JPA domain model, repositories, core services, Flyway schema |
 | `eventrelay-api`    | Spring Boot app (`:8080`) | REST API: ingestion, subscriptions, DLQ/replay, Redis idempotency |
 | `eventrelay-dispatcher` | Spring Boot app (`:8081`) | Outbox relay, SQS scheduler + consumer, HMAC-signed delivery, retries, DLQ |
+| `eventrelay-dashboard` | React + Vite (`:5173` dev, nginx in prod) | Delivery console: live stats, event log, delivery attempts, DLQ replay, subscriptions |
 
 ---
 
@@ -97,6 +98,9 @@ Two keystones:
       [Standard Webhooks](https://www.standardwebhooks.com/) signature compliance,
       OpenAPI/Swagger UI, and measured k6 benchmarks that uncovered and fixed two
       real bottlenecks (see [BENCHMARKS.md](./BENCHMARKS.md)).
+- [x] **M6 — Tracing & console.** OpenTelemetry distributed tracing whose context
+      survives the async boundary (one trace spans ingest → SQS → delivery), plus a
+      React delivery console.
 
 ### Deliberate simplifications (revisited later)
 - Status columns are `VARCHAR + CHECK` rather than native PG `ENUM` types (cleaner JPA mapping).
@@ -179,6 +183,46 @@ constant time; reject if the timestamp is more than 5 minutes old.
 | `POST` | `/api/v1/events/{id}/replay` | Bearer | Re-queue dead-lettered deliveries for an event |
 | `GET`  | `/api/v1/dead-letter` | Bearer | List dead-lettered events (paginated) |
 | `GET`  | `/actuator/health` | — | Health check (both services) |
+
+## Delivery console
+
+A React + Vite dashboard for the people who operate this thing: live delivery stats,
+the event log, per-attempt delivery history, one-click DLQ replay, and subscription
+management. Designed as **liquid glass over claymorphism** in a light theme —
+translucent blurred surfaces with specular edges floating above soft, puffy,
+tactile controls.
+
+```bash
+cd eventrelay-dashboard
+npm install
+npm run dev        # http://localhost:5173, proxies /api to :8080
+```
+
+Paste the tenant API key on first load (kept in `localStorage`, sent as a bearer
+token). In production the same app is built into an nginx image that proxies `/api`
+to the API container, so the browser stays same-origin and no CORS config exists
+anywhere in the stack.
+
+## Distributed tracing
+
+Metrics and logs answer "how many" and "what happened"; traces answer **"where did
+the time go for *this* event"**. The hard part is that ingest and delivery happen in
+different processes, minutes (and retries) apart — so the trace context is persisted
+onto the event at ingest and resumed by the dispatcher:
+
+```
+trace 9f4d0223…
+ ├─ [eventrelay-api]        http post /api/v1/events
+ └─ [eventrelay-dispatcher] webhook.delivery   event.type=order.created
+                                               delivery.attempt=1  http.status_code=200
+```
+
+The `traceparent` is also forwarded to the subscriber, so consumers can join the same
+trace. Jaeger UI at `http://localhost:16686`:
+
+```bash
+docker compose --profile observability up -d jaeger
+```
 
 ## Operational features (M3)
 

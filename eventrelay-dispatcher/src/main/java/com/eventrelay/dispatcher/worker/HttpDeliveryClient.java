@@ -8,6 +8,7 @@ import com.eventrelay.core.domain.DeliveryStatus;
 import com.eventrelay.core.domain.Event;
 import com.eventrelay.core.domain.Subscription;
 import com.eventrelay.core.repository.DeliveryAttemptRepository;
+import com.eventrelay.dispatcher.tracing.DeliveryTracer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -42,15 +43,17 @@ public class HttpDeliveryClient {
     private final DeliveryAttemptRepository attempts;
     private final ObjectMapper objectMapper;
     private final MeterRegistry metrics;
+    private final DeliveryTracer deliveryTracer;
     private final HttpClient httpClient;
     private final Duration requestTimeout;
 
     public HttpDeliveryClient(DeliveryAttemptRepository attempts, ObjectMapper objectMapper,
-                              MeterRegistry metrics,
+                              MeterRegistry metrics, DeliveryTracer deliveryTracer,
                               @Value("${eventrelay.delivery.http-timeout-ms:30000}") long timeoutMs) {
         this.attempts = attempts;
         this.objectMapper = objectMapper;
         this.metrics = metrics;
+        this.deliveryTracer = deliveryTracer;
         this.requestTimeout = Duration.ofMillis(timeoutMs);
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
@@ -75,7 +78,7 @@ public class HttpDeliveryClient {
         long start = System.nanoTime();
         DeliveryOutcome outcome;
         try {
-            HttpRequest request = HttpRequest.newBuilder()
+            HttpRequest.Builder builder = HttpRequest.newBuilder()
                     .uri(URI.create(delivery.getTargetUrl()))
                     .timeout(requestTimeout)
                     .header("Content-Type", "application/json")
@@ -89,10 +92,13 @@ public class HttpDeliveryClient {
                     .header("webhook-id", messageId)
                     .header("webhook-timestamp", Long.toString(timestamp))
                     .header("webhook-signature", standardSignature)
-                    .POST(HttpRequest.BodyPublishers.ofString(body))
-                    .build();
+                    .POST(HttpRequest.BodyPublishers.ofString(body));
 
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            // Propagate trace context so the subscriber can join the same trace.
+            deliveryTracer.outboundHeaders().forEach(builder::header);
+
+            HttpResponse<String> response =
+                    httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString());
             int code = response.statusCode();
             attempt.setHttpStatusCode(code);
             attempt.setResponseBodySnippet(snippet(response.body()));
