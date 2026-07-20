@@ -1,5 +1,11 @@
 # EventRelay
 
+[![CI](https://github.com/sathwik7993/EventRelay/actions/workflows/ci.yml/badge.svg)](https://github.com/sathwik7993/EventRelay/actions/workflows/ci.yml)
+![Java](https://img.shields.io/badge/Java-17-orange)
+![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.2-brightgreen)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-blue)
+![AWS SQS](https://img.shields.io/badge/AWS-SQS-ff9900)
+
 **A reliable webhook delivery platform** — guarantees that every event reaches its
 destination, with at-least-once delivery, retries, dead-lettering, HMAC signing,
 and full delivery observability.
@@ -67,8 +73,10 @@ Two keystones:
       with a provisioned Prometheus + Grafana stack; structured JSON logging with
       correlation ids; a Testcontainers integration test; and an automated chaos test
       proving zero event loss across a `kill -9` mid-flight.
-- [ ] **M4 — Deploy & showcase.** Dockerfiles, GitHub Actions CI, deploy to a
-      DigitalOcean droplet (+ real AWS SQS), Terraform/ECS configs as artifacts.
+- [x] **M4 — Deploy & showcase.** Multi-stage Docker build for both services,
+      single-host production stack (`docker-compose.prod.yml`), GitHub Actions CI
+      (build + Testcontainers tests + image builds), a Terraform ECS Fargate
+      reference architecture, and a deployment guide.
 
 ### Deliberate simplifications (revisited later)
 - Status columns are `VARCHAR + CHECK` rather than native PG `ENUM` types (cleaner JPA mapping).
@@ -170,6 +178,27 @@ constant time; reject if the timestamp is more than 5 minutes old.
   deliveries in flight — every event is still delivered (at-least-once) once the
   worker restarts; nothing is lost. SQS visibility-timeout redelivery plus a
   lease-based reclaim of stuck in-flight rows guarantee recovery.
+
+## Deployment
+
+| Artifact | What it is |
+|---|---|
+| `Dockerfile` | One multi-stage build for both services (`--build-arg MODULE=eventrelay-api\|eventrelay-dispatcher`); non-root runtime on a JRE base |
+| `docker-compose.prod.yml` | Single-host production stack (Postgres + Redis + both services) using **real AWS SQS** |
+| `.github/workflows/ci.yml` | CI: Maven `verify` (Testcontainers integration tests run here), test-report/jar artifacts, and container image builds |
+| `infra/terraform/` | ECS Fargate reference architecture: ALB, two services, IAM least-privilege, CloudWatch, autoscaling on SQS queue depth |
+| `docs/DEPLOYMENT.md` | Step-by-step droplet deployment, scoped IAM policy, smoke test, and operations runbook |
+
+```bash
+cp .env.prod.example .env && $EDITOR .env
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+**Why a droplet and not ECS:** ECS Fargate, RDS, and ElastiCache are not free-tier.
+The demo runs on one DigitalOcean droplet (student credit) with **real AWS SQS**,
+which *is* permanently free to 1M requests/month. The Terraform config is the
+production design of record — the same images deploy to either target because all
+configuration is environment-variable driven.
 
 ### Webhook delivery headers
 ```
